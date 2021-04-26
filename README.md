@@ -20,6 +20,7 @@ from pybradesco import Bradesco
 # Inicializar
 bradesco = Bradesco()
 
+# Abre página de login, digita agencia e conta
 bradesco.prepare('AG', 'CC', 'DIGITO_VERIFICADOR')
 
 # Autenticar com senha e  token gerado do celular
