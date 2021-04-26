@@ -1,111 +1,157 @@
+from datetime import datetime
 from time import sleep
+from typing import List
 
-from selenium.webdriver import Remote
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.expected_conditions import presence_of_element_located, \
-    frame_to_be_available_and_switch_to_it
-from selenium.webdriver.support.wait import WebDriverWait
+from playwright.sync_api import sync_playwright, TimeoutError
+
+from pybradesco import BradescoTransaction
+
+
+def parse_brl_to_float(value: str) -> float:
+    return float(value.replace('.', '').replace(',', '.').replace(' ', ''))
 
 
 class Bradesco:
     BASE_PATH = 'https://banco.bradesco/html/classic/index.shtm'
 
-    def __init__(self, branch, account, verifying_digit, web_password):
-        self.branch = branch
-        self.account = account
-        self.verifying_digit = verifying_digit
-        self.web_password = web_password
+    def __init__(self, preview=False):
+        self.playwright = sync_playwright().start()
+        self.browser = self.playwright.chromium.launch(headless=not preview)
+        self.page = self.browser.new_page()
 
-        self.driver = Remote(
-            command_executor='http://127.0.0.1:4444/wd/hub',
-            desired_capabilities={'browserName': 'chrome'}
-        )
+    def prepare(self, branch: str, account: str, verifying_digit: str, retry=False):
+        self.page.goto(self.BASE_PATH)
+        # Agência
+        self.page.type('id=AGN', branch)
 
-        self.wait = WebDriverWait(self.driver, 60)
+        # Conta Corrente
+        self.page.type('id=CTA', account)
+
+        # Digito Verificador
+        self.page.type('id=DIGCTA', verifying_digit)
+
+        # Botão Entrar
+        self.page.click('css=.btn-ok')
+
+        # Modal de IR
+        self.page.click('css=.mfp-close')
+
+        try:
+            self.page.wait_for_selector('css=.img-negado', timeout=5000)
+
+            if retry:
+                raise Exception('Erro ao abrir página de login')
+            else:
+                print('Acesso negado, tentando novamente')
+                self.prepare(branch, account, verifying_digit, True)
+        except TimeoutError:
+            pass
 
     def _type_safe_keyboard(self, password: str):
         for char in password:
-            self.driver.find_element_by_xpath(f'//a[.="{char}"]').click()
+            self.page.click(f'xpath=//a[.="{char}"]')
 
-    def authenticate(self, token):
-        self.driver.get(self.BASE_PATH)
+    def authenticate(self, web_password: str, token):
+        # Token
+        self.page.type('id=Password1', token)
 
-        # Agência
-        self.driver.find_element_by_id('AGN').send_keys(self.branch)
-
-        # Conta Corrente
-        self.driver.find_element_by_id('CTA').send_keys(self.account)
-
-        # Digito Verificador
-        self.driver.find_element_by_id('DIGCTA').send_keys(self.verifying_digit)
-
-        # Botão Entrar
-        self.driver.find_element_by_css_selector('.btn-ok').click()
+        # Avançar
+        self.page.click('id=loginbotoes:botaoAcessar')
 
         # Senha Web
-        self._type_safe_keyboard(self.web_password)
+        self._type_safe_keyboard(web_password)
 
-        # Token
-        self.wait.until(
-            presence_of_element_located((By.CSS_SELECTOR, 'input[id="form_j_token:Password1"]'))
-        ).send_keys(token)
+        # Entrar
+        self.page.click('id=loginbotoes:botaoAcessar')
 
-        self.driver.find_element_by_css_selector('input[id="loginbotoes:botaoAvancar"]').click()
-
-        # Espera loading
-        self.wait.until(
-            presence_of_element_located((By.XPATH, '//a[.="Saldos e Extratos"]'))
-        )
-
-        self._remove_home_modal()
-
-    def _remove_home_modal(self):
-        sleep(10)
-        if len(self.driver.find_elements_by_css_selector('.jqmOverlay')) >= 1:
-            self.driver.execute_script('document.querySelector(".jqmOverlay").remove()')
-
-    def get_account_statements(self):
+    def get_checking_account_statements(self) -> List[BradescoTransaction]:
         data = []
+
         # Acessa a tela de extrato nos últimos 90 dias
-        self.wait.until(
-            presence_of_element_located((By.XPATH, '//a[.="Saldos e Extratos"]'))
-        ).click()
-        self.wait.until(
-            frame_to_be_available_and_switch_to_it((By.ID, 'paginaCentral'))
-        )
-        self.wait.until(
-            presence_of_element_located((By.XPATH, '//a[.="Extrato (Últimos Lançamentos)"]'))
-        ).click()
-        self.wait.until(
-            presence_of_element_located((By.CSS_SELECTOR, 'li[id="fEx:viewFiltroBusca:l1diacont90off"'))
-        ).click()
+        self.page.click('css=button[title="Saldos e Extratos"]')
+
+        iframe = self.page.query_selector('id=paginaCentral').content_frame()
+
+        iframe.click('css=a[title="Conta-Corrente - Extrato (Últimos Lançamentos)"]')
+
+        iframe.click('id=fEx:viewFiltroBusca:_id102')
 
         # Faz o parse
-        table = self.wait.until(
-            presence_of_element_located((By.CSS_SELECTOR, 'table[id="fEx:dexs_0:vexd:dex"'))
-        )
-        rows = table.find_elements_by_css_selector('tbody > tr')
+        sleep(5)
+
+        table = iframe.wait_for_selector('css=table[id="fEx:dexs_0:vexd:dex"]')
+
+        rows = table.query_selector_all('css=tbody > tr')
+
         last_date = None
-        for row in rows:
-            print(f'Looper !')
-            current_date = row.find_element_by_css_selector('td:nth-of-type(1)').text.strip()
-            payment_info = row.find_element_by_css_selector('td:nth-of-type(2)').text.strip()
-            credit = row.find_element_by_css_selector('td:nth-of-type(4)').text.strip()
-            if credit == '':
-                amount = row.find_element_by_css_selector('td:nth-of-type(5)').text.strip()
-            else:
-                amount = credit
+
+        for r in rows:
+            current_date = r.query_selector('css=td:nth-of-type(1)').text_content().strip()
+            description = r.query_selector('css=td:nth-of-type(2)').text_content().strip()
+            credit = r.query_selector('css=td:nth-of-type(4)').text_content().strip()
+            debit = r.query_selector('css=td:nth-of-type(5)').text_content().strip()
+
+            amount = credit if credit != '' else debit
             if amount == '':
-                amount = None
+                continue
             else:
-                amount = float(amount.replace('.', '').replace(',', '.').replace(' ', ''))
+                amount = parse_brl_to_float(amount)
 
             if current_date != '':
                 last_date = current_date
 
-            data.append({
-                'date': last_date,
-                'payment_info': payment_info,
-                'amount': amount
-            })
+            data.append(BradescoTransaction(
+                datetime.strptime(last_date, '%d/%m/%y'),
+                description,
+                amount,
+            ))
+
+        return data
+
+    def get_credit_card_statements(self) -> List[BradescoTransaction]:
+        data = []
+        self.page.click('css=button[title="Cartões"]')
+
+        iframe = self.page.query_selector('id=paginaCentral').content_frame()
+
+        iframe.click('css=.colMenu a[title="Extratos"]')
+
+        iframe.click('css=#divContainerLancamentos .lnk-expansor')
+        table = iframe.wait_for_selector('css=.tabGenerica.vAm.topb')
+        rows = table.query_selector_all('tbody > tr')
+
+        for row in rows:
+            current_date = row.query_selector('css=td:nth-of-type(1)').text_content().strip()
+            description = row.query_selector('css=td:nth-of-type(2)').text_content().strip()
+            amount = row.query_selector('css=td:nth-of-type(6)').text_content().strip()
+            amount = parse_brl_to_float(amount)
+
+            parsed_date = datetime.strptime(current_date, '%d/%m').replace(year=datetime.now().year)
+            data.append(BradescoTransaction(
+                parsed_date,
+                description,
+                amount
+            ))
+
+        iframe.click('css=a[title="Extrato Fechado Pressione Enter para selecionar."]')
+
+        iframe.click('css=#divDadosExtrato .lnk-expansor')
+
+        table = iframe.wait_for_selector('css=.tabGenerica.vAm.topb')
+
+        rows = table.query_selector_all('tbody > tr')
+
+        for row in rows:
+            current_date = row.query_selector('css=td:nth-of-type(1)').text_content().strip()
+            description = row.query_selector('css=td:nth-of-type(2)').text_content().strip()
+            amount = row.query_selector('css=td:nth-of-type(6)').text_content().strip()
+            amount = parse_brl_to_float(amount)
+
+            parsed_date = datetime.strptime(current_date, '%d/%m').replace(year=datetime.now().year)
+            data.append(BradescoTransaction(
+                parsed_date,
+                description,
+                amount
+            ))
+
         return data
