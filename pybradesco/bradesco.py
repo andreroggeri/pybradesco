@@ -4,7 +4,7 @@ from typing import List
 
 from playwright.sync_api import sync_playwright, TimeoutError
 
-from pybradesco import BradescoTransaction
+from pybradesco.bradesco_transaction import BradescoTransaction
 
 
 def parse_brl_to_float(value: str) -> float:
@@ -151,7 +151,7 @@ class Bradesco:
             data.append(BradescoTransaction(
                 parsed_date,
                 description,
-                amount
+                amount * -1
             ))
 
         return data
