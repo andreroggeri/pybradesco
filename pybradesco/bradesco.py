@@ -33,11 +33,6 @@ class Bradesco:
         # Botão Entrar
         self.page.click('css=.btn-ok')
 
-        # Modal de 25 anos
-        self.page.wait_for_selector('css=.c-balloon-container')
-        self.page.mouse.click(0, 0)
-
-
         try:
             self.page.wait_for_selector('css=.img-negado', timeout=5000)
 
