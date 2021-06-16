@@ -113,22 +113,28 @@ class Bradesco:
 
         iframe.click('css=.colMenu a[title="Extratos"]')
 
-        iframe.click('css=#divContainerLancamentos .lnk-expansor')
-        table = iframe.wait_for_selector('css=.tabGenerica.vAm.topb')
-        rows = table.query_selector_all('tbody > tr')
+        iframe.wait_for_selector('css=#divContainerLancamentos .lnk-expansor')
 
-        for row in rows:
-            current_date = row.query_selector('css=td:nth-of-type(1)').text_content().strip()
-            description = row.query_selector('css=td:nth-of-type(2)').text_content().strip()
-            amount = row.query_selector('css=td:nth-of-type(6)').text_content().strip()
-            amount = parse_brl_to_float(amount)
+        expand_buttons = iframe.query_selector_all('css=#divContainerLancamentos .lnk-expansor')
 
-            parsed_date = datetime.strptime(current_date, '%d/%m').replace(year=datetime.now().year)
-            data.append(BradescoTransaction(
-                parsed_date,
-                description,
-                amount
-            ))
+        for idx, button in enumerate(expand_buttons):
+            button.click()
+            sleep(0.5)
+            table = iframe.query_selector_all('css=.tabGenerica.vAm.topb')[idx]
+            rows = table.query_selector_all('tbody > tr')
+
+            for row in rows:
+                current_date = row.query_selector('css=td:nth-of-type(1)').text_content().strip()
+                description = row.query_selector('css=td:nth-of-type(2)').text_content().strip()
+                amount = row.query_selector('css=td:nth-of-type(6)').text_content().strip()
+                amount = parse_brl_to_float(amount)
+
+                parsed_date = datetime.strptime(current_date, '%d/%m').replace(year=datetime.now().year)
+                data.append(BradescoTransaction(
+                    parsed_date,
+                    description,
+                    amount
+                ))
 
         iframe.click('css=a[title="Extrato Fechado Pressione Enter para selecionar."]')
 
