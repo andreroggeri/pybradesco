@@ -33,6 +33,12 @@ class Bradesco:
         # Botão Entrar
         self.page.click('css=.btn-ok')
 
+        # Modal que aparece no login
+        try:
+            self.page.wait_for_selector('css=.mfp-close', timeout=3000).click()
+        except TimeoutError:
+            print('Modal de login não apareceu')
+
         try:
             self.page.wait_for_selector('css=.img-negado', timeout=5000)
 
