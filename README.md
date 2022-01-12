@@ -19,24 +19,25 @@ from pybradesco import Bradesco
 
 # Inicializar
 bradesco = Bradesco()
+await bradesco.init()
 
 # Abre página de login, digita agencia e conta
-bradesco.prepare('AG', 'CC', 'DIGITO_VERIFICADOR')
+await bradesco.prepare('AG', 'CC', 'DIGITO_VERIFICADOR')
 
 # Autenticar com senha e  token gerado do celular
-bradesco.authenticate('SENHA_WEB', '123123')
+await bradesco.authenticate('SENHA_WEB', '123123')
 ```
 
 ## Cartão de Crédito
 ```python
 
 # Retorna dados da fatura aberta + dados da última fatura
-print(bradesco.get_credit_card_statements())
+print(await bradesco.get_credit_card_statements())
 ```
 
 ## Conta corrente
 ```python
 # Retorna o extrato dos últimos 90 dias
-print(bradesco.get_checking_account_statements())
+print(await bradesco.get_checking_account_statements())
 ```
 
