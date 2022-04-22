@@ -1,8 +1,8 @@
-import asyncio
 from datetime import datetime
+from time import sleep
 from typing import List
 
-from playwright.async_api import Page, Browser, Playwright, async_playwright, ElementHandle, TimeoutError
+from playwright.sync_api import sync_playwright, TimeoutError
 
 from pybradesco.bradesco_transaction import BradescoTransaction
 
@@ -13,99 +13,86 @@ def parse_brl_to_float(value: str) -> float:
 
 class Bradesco:
     BASE_PATH = 'https://banco.bradesco/html/classic/index.shtm'
-    page: Page
-    browser: Browser
-    playwright: Playwright
 
     def __init__(self, preview=False):
-        self.preview = preview
+        self.playwright = sync_playwright().start()
+        self.browser = self.playwright.chromium.launch(headless=not preview)
+        self.page = self.browser.new_page()
 
-    async def init(self):
-        self.playwright = await async_playwright().start()
-        self.browser = await self.playwright.chromium.launch(headless=not self.preview)
-        self.page = await self.browser.new_page()
-
-    async def prepare(self, branch: str, account: str, verifying_digit: str, retry=False):
-        await self.page.goto(self.BASE_PATH)
+    def prepare(self, branch: str, account: str, verifying_digit: str, retry=False):
+        self.page.goto(self.BASE_PATH)
         # Agência
-        await self.page.type('id=AGN', branch)
+        self.page.type('id=AGN', branch)
 
         # Conta Corrente
-        await self.page.type('id=CTA', account)
+        self.page.type('id=CTA', account)
 
         # Digito Verificador
-        await self.page.type('id=DIGCTA', verifying_digit)
+        self.page.type('id=DIGCTA', verifying_digit)
 
         # Botão Entrar
-        await self.page.click('css=.btn-ok')
+        self.page.click('css=.btn-ok')
 
         # Modal que aparece no login
         try:
-            await(await self.page.wait_for_selector('css=.mfp-close', timeout=3000)).click()
+            self.page.wait_for_selector('css=.mfp-close', timeout=3000).click()
         except TimeoutError:
             print('Modal de login não apareceu')
 
         try:
-            await self.page.wait_for_selector('css=.img-negado', timeout=5000)
+            self.page.wait_for_selector('css=.img-negado', timeout=5000)
 
             if retry:
                 raise Exception('Erro ao abrir página de login')
             else:
                 print('Acesso negado, tentando novamente')
-                await self.prepare(branch, account, verifying_digit, True)
+                self.prepare(branch, account, verifying_digit, True)
         except TimeoutError:
             pass
 
-    async def _type_safe_keyboard(self, password: str):
+    def _type_safe_keyboard(self, password: str):
         for char in password:
-            await self.page.click(f'xpath=//a[.="{char}"]')
+            self.page.click(f'xpath=//a[.="{char}"]')
 
-    async def _get_element_text(self, element: ElementHandle, selector: str):
-        nested_element = await element.query_selector(selector)
-        text = await nested_element.text_content()
-
-        return text.strip()
-
-    async def authenticate(self, web_password: str, token):
+    def authenticate(self, web_password: str, token):
         # Token
-        await self.page.type('id=Password1', token)
+        self.page.type('id=Password1', token)
 
         # Avançar
-        await self.page.click('id=loginbotoes:botaoAcessar')
+        self.page.click('id=loginbotoes:botaoAcessar')
 
         # Senha Web
-        await self._type_safe_keyboard(web_password)
+        self._type_safe_keyboard(web_password)
 
         # Entrar
-        await self.page.click('id=loginbotoes:botaoAcessar')
+        self.page.click('id=loginbotoes:botaoAcessar')
 
-    async def get_checking_account_statements(self) -> List[BradescoTransaction]:
+    def get_checking_account_statements(self) -> List[BradescoTransaction]:
         data = []
 
         # Acessa a tela de extrato nos últimos 90 dias
-        await self.page.click('css=button[title="Saldos e Extratos"]')
+        self.page.click('css=button[title="Saldos e Extratos"]')
 
-        iframe_element = await self.page.query_selector('id=paginaCentral')
-        iframe = await iframe_element.content_frame()
+        iframe = self.page.query_selector('id=paginaCentral').content_frame()
 
-        await iframe.click('css=a[title="Conta-Corrente - Extrato (Últimos Lançamentos)"]')
+        iframe.click('css=a[title="Conta-Corrente - Extrato (Últimos Lançamentos)"]')
 
-        await iframe.click('id=fEx:viewFiltroBusca:_id102')
+        iframe.click('id=fEx:viewFiltroBusca:_id102')
 
         # Faz o parse
-        await asyncio.sleep(5)
+        sleep(5)
 
-        table = await iframe.wait_for_selector('css=table[id="fEx:dexs_0:vexd:dex"]')
+        table = iframe.wait_for_selector('css=table[id="fEx:dexs_0:vexd:dex"]')
 
-        rows = await table.query_selector_all('css=tbody > tr')
+        rows = table.query_selector_all('css=tbody > tr')
 
         last_date = None
 
         for r in rows:
-            current_date = await self._get_element_text(r, 'css=td:nth-of-type(1)')
-            description = await self._get_element_text(r, 'css=td:nth-of-type(2)')
-            credit = await self._get_element_text(r, 'css=td:nth-of-type(4)')
-            debit = await self._get_element_text(r, 'css=td:nth-of-type(5)')
+            current_date = r.query_selector('css=td:nth-of-type(1)').text_content().strip()
+            description = r.query_selector('css=td:nth-of-type(2)').text_content().strip()
+            credit = r.query_selector('css=td:nth-of-type(4)').text_content().strip()
+            debit = r.query_selector('css=td:nth-of-type(5)').text_content().strip()
 
             amount = credit if credit != '' else debit
             if amount == '':
@@ -124,28 +111,28 @@ class Bradesco:
 
         return data
 
-    async def get_credit_card_statements(self) -> List[BradescoTransaction]:
+    def get_credit_card_statements(self) -> List[BradescoTransaction]:
         data = []
-        await self.page.click('css=button[title="Cartões"]')
+        self.page.click('css=button[title="Cartões"]')
 
-        iframe = await(await self.page.query_selector('id=paginaCentral')).content_frame()
+        iframe = self.page.query_selector('id=paginaCentral').content_frame()
 
-        await iframe.click('css=.colMenu a[title="Extratos"]')
+        iframe.click('css=.colMenu a[title="Extratos"]')
 
-        await iframe.wait_for_selector('css=#divContainerLancamentos .lnk-expansor')
+        iframe.wait_for_selector('css=#divContainerLancamentos .lnk-expansor')
 
-        expand_buttons = await iframe.query_selector_all('css=#divContainerLancamentos .lnk-expansor')
+        expand_buttons = iframe.query_selector_all('css=#divContainerLancamentos .lnk-expansor')
 
         for idx, button in enumerate(expand_buttons):
-            await button.click()
-            await asyncio.sleep(0.5)
-            table = (await iframe.query_selector_all('css=.tabGenerica.vAm.topb'))[idx]
-            rows = await table.query_selector_all('tbody > tr')
+            button.click()
+            sleep(0.5)
+            table = iframe.query_selector_all('css=.tabGenerica.vAm.topb')[idx]
+            rows = table.query_selector_all('tbody > tr')
 
             for row in rows:
-                current_date = await self._get_element_text(row, 'css=td:nth-of-type(1)')
-                description = await self._get_element_text(row, 'css=td:nth-of-type(2)')
-                amount = await self._get_element_text(row, 'css=td:nth-of-type(6)')
+                current_date = row.query_selector('css=td:nth-of-type(1)').text_content().strip()
+                description = row.query_selector('css=td:nth-of-type(2)').text_content().strip()
+                amount = row.query_selector('css=td:nth-of-type(6)').text_content().strip()
                 amount = parse_brl_to_float(amount)
 
                 parsed_date = datetime.strptime(current_date, '%d/%m').replace(year=datetime.now().year)
@@ -155,18 +142,18 @@ class Bradesco:
                     amount
                 ))
 
-        await iframe.click('css=a[title="Extrato Fechado Pressione Enter para selecionar."]')
+        iframe.click('css=a[title="Extrato Fechado Pressione Enter para selecionar."]')
 
-        await iframe.click('css=#divDadosExtrato .lnk-expansor')
+        iframe.click('css=#divDadosExtrato .lnk-expansor')
 
-        table = await iframe.wait_for_selector('css=.tabGenerica.vAm.topb')
+        table = iframe.wait_for_selector('css=.tabGenerica.vAm.topb')
 
-        rows = await table.query_selector_all('tbody > tr')
+        rows = table.query_selector_all('tbody > tr')
 
         for row in rows:
-            current_date = await self._get_element_text(row, 'css=td:nth-of-type(1)')
-            description = await self._get_element_text(row, 'css=td:nth-of-type(2)')
-            amount = await self._get_element_text(row, 'css=td:nth-of-type(6)')
+            current_date = row.query_selector('css=td:nth-of-type(1)').text_content().strip()
+            description = row.query_selector('css=td:nth-of-type(2)').text_content().strip()
+            amount = row.query_selector('css=td:nth-of-type(6)').text_content().strip()
             amount = parse_brl_to_float(amount)
 
             parsed_date = datetime.strptime(current_date, '%d/%m').replace(year=datetime.now().year)
