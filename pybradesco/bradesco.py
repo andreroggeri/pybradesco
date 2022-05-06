@@ -109,6 +109,32 @@ class Bradesco:
                 amount,
             ))
 
+        iframe.click('a[id="fEx:dexs_0:viewLanctosAnteriores:lnkAnt0"]')
+
+        table = iframe.wait_for_selector('table[id="fEx:dexs_0:viewLanctosAnteriores:datalancant"]')
+        rows = table.query_selector_all('css=tbody > tr')
+
+        for r in rows:
+            current_date = r.query_selector('css=td:nth-of-type(1) div').text_content().strip()
+            description = r.query_selector('css=td:nth-of-type(2)').text_content().strip()
+            credit = r.query_selector('css=td:nth-of-type(4)').text_content().strip()
+            debit = r.query_selector('css=td:nth-of-type(5)').text_content().strip()
+
+            amount = credit if credit != '' else debit
+            if amount == '':
+                continue
+            else:
+                amount = parse_brl_to_float(amount)
+
+            if current_date != '':
+                last_date = current_date
+
+            data.append(BradescoTransaction(
+                datetime.strptime(last_date, '%d/%m/%y'),
+                description,
+                amount,
+            ))
+
         return data
 
     def get_credit_card_statements(self) -> List[BradescoTransaction]:
